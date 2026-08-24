@@ -1,0 +1,100 @@
+import Anthropic from "@anthropic-ai/sdk";
+
+export interface ParsedMealItem {
+  name: string;
+  quantity: string;
+  calories: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+}
+
+export interface ParsedMeal {
+  items: ParsedMealItem[];
+  calories: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+}
+
+const TOOL_NAME = "log_meal_nutrition";
+
+function client() {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  return new Anthropic({ apiKey });
+}
+
+export async function parseMeal(rawText: string): Promise<ParsedMeal> {
+  const anthropic = client();
+
+  if (!anthropic) {
+    // No API key configured — fall back to a single unestimated item so the
+    // entry is still saved and can be edited later.
+    return {
+      items: [{ name: rawText, quantity: "1 serving", calories: 0, proteinG: 0, carbsG: 0, fatG: 0 }],
+      calories: 0,
+      proteinG: 0,
+      carbsG: 0,
+      fatG: 0,
+    };
+  }
+
+  const message = await anthropic.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 1024,
+    system:
+      "You are a nutrition estimation assistant. Given a free-text description of a meal or snack, " +
+      "break it into individual food items and estimate reasonable nutrition values for the quantities " +
+      "described (or typical single-serving quantities if none are given). Use your best real-world " +
+      "knowledge of nutrition. Always call the log_meal_nutrition tool exactly once with your best estimate " +
+      "— never ask a clarifying question.",
+    messages: [{ role: "user", content: rawText }],
+    tool_choice: { type: "tool", name: TOOL_NAME },
+    tools: [
+      {
+        name: TOOL_NAME,
+        description: "Records the structured nutrition breakdown of a logged meal.",
+        input_schema: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Short food item name, e.g. 'grilled chicken breast'" },
+                  quantity: { type: "string", description: "Quantity/serving size, e.g. '6 oz' or '1 cup'" },
+                  calories: { type: "integer" },
+                  proteinG: { type: "integer", description: "Grams of protein" },
+                  carbsG: { type: "integer", description: "Grams of carbohydrates" },
+                  fatG: { type: "integer", description: "Grams of fat" },
+                },
+                required: ["name", "quantity", "calories", "proteinG", "carbsG", "fatG"],
+              },
+            },
+          },
+          required: ["items"],
+        },
+      },
+    ],
+  });
+
+  const toolUse = message.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
+  );
+
+  const items = (toolUse?.input as { items?: ParsedMealItem[] } | undefined)?.items ?? [];
+
+  const totals = items.reduce(
+    (acc, item) => ({
+      calories: acc.calories + (item.calories || 0),
+      proteinG: acc.proteinG + (item.proteinG || 0),
+      carbsG: acc.carbsG + (item.carbsG || 0),
+      fatG: acc.fatG + (item.fatG || 0),
+    }),
+    { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 },
+  );
+
+  return { items, ...totals };
+}

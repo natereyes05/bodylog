@@ -1,0 +1,26 @@
+export interface WeightLogDTO {
+  id: string;
+  loggedAt: string;
+  weightValue: number;
+  weightUnit: string;
+}
+
+export interface MealItemDTO {
+  name: string;
+  quantity: string;
+  calories: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+}
+
+export interface MealLogDTO {
+  id: string;
+  loggedAt: string;
+  rawText: string;
+  items: MealItemDTO[];
+  calories: number | null;
+  proteinG: number | null;
+  carbsG: number | null;
+  fatG: number | null;
+}

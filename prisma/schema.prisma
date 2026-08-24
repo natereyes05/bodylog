@@ -1,0 +1,49 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime    @default(now())
+  weightLogs   WeightLog[]
+  mealLogs     MealLog[]
+}
+
+model WeightLog {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loggedAt    DateTime
+  weightValue Float
+  weightUnit  String   @default("lb")
+  createdAt   DateTime @default(now())
+
+  @@index([userId, loggedAt])
+}
+
+model MealLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loggedAt  DateTime
+  rawText   String
+  items     Json
+  calories  Int?
+  proteinG  Int?
+  carbsG    Int?
+  fatG      Int?
+  createdAt DateTime @default(now())
+
+  @@index([userId, loggedAt])
+}
