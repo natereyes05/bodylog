@@ -49,6 +49,10 @@ export default function Dashboard({ userName }: { userName: string | null }) {
   };
 
   const totalCalories = mealLogs.reduce((sum, m) => sum + (m.calories ?? 0), 0);
+  const totalProtein = mealLogs.reduce((sum, m) => sum + (m.proteinG ?? 0), 0);
+  const totalCarbs = mealLogs.reduce((sum, m) => sum + (m.carbsG ?? 0), 0);
+  const totalFat = mealLogs.reduce((sum, m) => sum + (m.fatG ?? 0), 0);
+  const totalFiber = mealLogs.reduce((sum, m) => sum + (m.fiberG ?? 0), 0);
   const latestWeight = weightLogs[0];
 
   return (
@@ -100,11 +104,18 @@ export default function Dashboard({ userName }: { userName: string | null }) {
         )}
       </button>
 
-      <div className="mb-3 flex items-center justify-between rounded-2xl border border-border bg-surface p-4">
-        <span className="text-sm font-medium text-muted">Meals</span>
-        <span className="text-sm font-medium">
-          {mealLogs.length > 0 ? `${totalCalories} kcal today` : "Nothing logged yet"}
-        </span>
+      <div className="mb-3 rounded-2xl border border-border bg-surface p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-muted">Meals</span>
+          <span className="text-sm font-medium">
+            {mealLogs.length > 0 ? `${totalCalories} kcal today` : "Nothing logged yet"}
+          </span>
+        </div>
+        {mealLogs.length > 0 && (
+          <p className="mt-1 text-xs text-muted">
+            P {totalProtein}g · C {totalCarbs}g · F {totalFat}g · Fiber {totalFiber}g
+          </p>
+        )}
       </div>
 
       {loading ? (
