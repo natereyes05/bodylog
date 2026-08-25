@@ -19,7 +19,13 @@ export interface ParsedMeal {
   fiberG: number;
 }
 
+export interface PastMeal {
+  rawText: string;
+  items: ParsedMealItem[];
+}
+
 const TOOL_NAME = "log_meal_nutrition";
+const MAX_REFERENCE_MEALS = 60;
 
 function client() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -27,7 +33,26 @@ function client() {
   return new Anthropic({ apiKey });
 }
 
-export async function parseMeal(rawText: string): Promise<ParsedMeal> {
+function buildReferenceBlock(pastMeals: PastMeal[]): string {
+  if (pastMeals.length === 0) return "";
+
+  const lines = pastMeals.slice(0, MAX_REFERENCE_MEALS).map((meal) => {
+    const itemList = meal.items
+      .map((i) => `${i.name} (${i.quantity}): ${i.calories} kcal, ${i.proteinG}g protein, ${i.carbsG}g carbs, ${i.fatG}g fat, ${i.fiberG}g fiber`)
+      .join("; ");
+    return `- "${meal.rawText}" → ${itemList}`;
+  });
+
+  return (
+    "\n\nHere are foods this same user has logged before, with the exact nutrition values used at the time:\n" +
+    lines.join("\n") +
+    "\n\nIf the new entry is the same food or a clear repeat of one of these — even if worded differently — " +
+    "reuse those exact values instead of estimating fresh, so the user's numbers stay consistent over time. " +
+    "If it's a different food, a different quantity, or a variation, estimate normally instead."
+  );
+}
+
+export async function parseMeal(rawText: string, pastMeals: PastMeal[] = []): Promise<ParsedMeal> {
   const anthropic = client();
 
   if (!anthropic) {
@@ -53,7 +78,8 @@ export async function parseMeal(rawText: string): Promise<ParsedMeal> {
       "break it into individual food items and estimate reasonable nutrition values for the quantities " +
       "described (or typical single-serving quantities if none are given). Use your best real-world " +
       "knowledge of nutrition. Always call the log_meal_nutrition tool exactly once with your best estimate " +
-      "— never ask a clarifying question.",
+      "— never ask a clarifying question." +
+      buildReferenceBlock(pastMeals),
     messages: [{ role: "user", content: rawText }],
     tool_choice: { type: "tool", name: TOOL_NAME },
     tools: [

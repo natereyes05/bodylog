@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { parseMeal } from "@/lib/parseMeal";
+import { parseMeal, type ParsedMealItem, type PastMeal } from "@/lib/parseMeal";
 import type { Prisma } from "@/generated/prisma/client";
 
 export async function GET(req: Request) {
@@ -38,7 +38,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Describe what you ate." }, { status: 400 });
   }
 
-  const parsed = await parseMeal(rawText);
+  const recentMeals = await prisma.mealLog.findMany({
+    where: { userId: session.user.id },
+    orderBy: { loggedAt: "desc" },
+    distinct: ["rawText"],
+    take: 60,
+    select: { rawText: true, items: true },
+  });
+  const pastMeals: PastMeal[] = recentMeals.map((m) => ({
+    rawText: m.rawText,
+    items: m.items as unknown as ParsedMealItem[],
+  }));
+
+  const parsed = await parseMeal(rawText, pastMeals);
 
   const log = await prisma.mealLog.create({
     data: {
