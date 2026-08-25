@@ -50,6 +50,7 @@ export async function POST(req: Request) {
       proteinG: parsed.proteinG,
       carbsG: parsed.carbsG,
       fatG: parsed.fatG,
+      fiberG: parsed.fiberG,
     },
   });
 

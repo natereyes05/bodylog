@@ -131,6 +131,12 @@ export default function Dashboard({ userName }: { userName: string | null }) {
                   </button>
                 </div>
               </div>
+              {(meal.proteinG || meal.carbsG || meal.fatG || meal.fiberG) && (
+                <p className="mt-2 text-xs text-muted">
+                  P {meal.proteinG ?? 0}g · C {meal.carbsG ?? 0}g · F {meal.fatG ?? 0}g · Fiber{" "}
+                  {meal.fiberG ?? 0}g
+                </p>
+              )}
               {meal.items?.length > 0 && (
                 <ul className="mt-2 space-y-1 border-t border-border pt-2">
                   {meal.items.map((item, i) => (

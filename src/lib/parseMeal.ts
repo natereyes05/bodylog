@@ -7,6 +7,7 @@ export interface ParsedMealItem {
   proteinG: number;
   carbsG: number;
   fatG: number;
+  fiberG: number;
 }
 
 export interface ParsedMeal {
@@ -15,6 +16,7 @@ export interface ParsedMeal {
   proteinG: number;
   carbsG: number;
   fatG: number;
+  fiberG: number;
 }
 
 const TOOL_NAME = "log_meal_nutrition";
@@ -32,11 +34,14 @@ export async function parseMeal(rawText: string): Promise<ParsedMeal> {
     // No API key configured — fall back to a single unestimated item so the
     // entry is still saved and can be edited later.
     return {
-      items: [{ name: rawText, quantity: "1 serving", calories: 0, proteinG: 0, carbsG: 0, fatG: 0 }],
+      items: [
+        { name: rawText, quantity: "1 serving", calories: 0, proteinG: 0, carbsG: 0, fatG: 0, fiberG: 0 },
+      ],
       calories: 0,
       proteinG: 0,
       carbsG: 0,
       fatG: 0,
+      fiberG: 0,
     };
   }
 
@@ -69,8 +74,9 @@ export async function parseMeal(rawText: string): Promise<ParsedMeal> {
                   proteinG: { type: "integer", description: "Grams of protein" },
                   carbsG: { type: "integer", description: "Grams of carbohydrates" },
                   fatG: { type: "integer", description: "Grams of fat" },
+                  fiberG: { type: "integer", description: "Grams of dietary fiber" },
                 },
-                required: ["name", "quantity", "calories", "proteinG", "carbsG", "fatG"],
+                required: ["name", "quantity", "calories", "proteinG", "carbsG", "fatG", "fiberG"],
               },
             },
           },
@@ -92,8 +98,9 @@ export async function parseMeal(rawText: string): Promise<ParsedMeal> {
       proteinG: acc.proteinG + (item.proteinG || 0),
       carbsG: acc.carbsG + (item.carbsG || 0),
       fatG: acc.fatG + (item.fatG || 0),
+      fiberG: acc.fiberG + (item.fiberG || 0),
     }),
-    { calories: 0, proteinG: 0, carbsG: 0, fatG: 0 },
+    { calories: 0, proteinG: 0, carbsG: 0, fatG: 0, fiberG: 0 },
   );
 
   return { items, ...totals };

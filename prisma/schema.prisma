@@ -43,6 +43,7 @@ model MealLog {
   proteinG  Int?
   carbsG    Int?
   fatG      Int?
+  fiberG    Int?
   createdAt DateTime @default(now())
 
   @@index([userId, loggedAt])

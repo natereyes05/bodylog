@@ -12,6 +12,7 @@ export interface MealItemDTO {
   proteinG: number;
   carbsG: number;
   fatG: number;
+  fiberG: number;
 }
 
 export interface MealLogDTO {
@@ -23,4 +24,5 @@ export interface MealLogDTO {
   proteinG: number | null;
   carbsG: number | null;
   fatG: number | null;
+  fiberG: number | null;
 }
