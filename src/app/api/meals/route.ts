@@ -43,10 +43,11 @@ export async function POST(req: Request) {
     orderBy: { loggedAt: "desc" },
     distinct: ["rawText"],
     take: 60,
-    select: { rawText: true, items: true },
+    select: { rawText: true, loggedAt: true, items: true },
   });
   const pastMeals: PastMeal[] = recentMeals.map((m) => ({
     rawText: m.rawText,
+    loggedAt: m.loggedAt,
     items: m.items as unknown as ParsedMealItem[],
   }));
 
