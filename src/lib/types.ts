@@ -25,4 +25,16 @@ export interface MealLogDTO {
   carbsG: number | null;
   fatG: number | null;
   fiberG: number | null;
+  userEdited: boolean;
+}
+
+export interface FavoriteMealDTO {
+  id: string;
+  rawText: string;
+  items: MealItemDTO[];
+  calories: number | null;
+  proteinG: number | null;
+  carbsG: number | null;
+  fatG: number | null;
+  fiberG: number | null;
 }

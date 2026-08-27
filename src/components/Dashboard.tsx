@@ -2,16 +2,20 @@
 
 import { useCallback, useEffect, useState } from "react";
 import AddEntrySheet from "@/components/AddEntrySheet";
+import EditMealSheet from "@/components/EditMealSheet";
 import { dayRange, formatTime, friendlyDayLabel, shiftDay, toDateInputValue } from "@/lib/dateUtils";
-import type { MealLogDTO, WeightLogDTO } from "@/lib/types";
+import type { FavoriteMealDTO, MealLogDTO, WeightLogDTO } from "@/lib/types";
 
 export default function Dashboard({ userName }: { userName: string | null }) {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [weightLogs, setWeightLogs] = useState<WeightLogDTO[]>([]);
   const [mealLogs, setMealLogs] = useState<MealLogDTO[]>([]);
+  const [favorites, setFavorites] = useState<FavoriteMealDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetTab, setSheetTab] = useState<"weight" | "meal">("meal");
+  const [editingMeal, setEditingMeal] = useState<MealLogDTO | null>(null);
+  const [favoritingId, setFavoritingId] = useState<string | null>(null);
 
   const load = useCallback(async (date: Date) => {
     setLoading(true);
@@ -26,12 +30,22 @@ export default function Dashboard({ userName }: { userName: string | null }) {
     setLoading(false);
   }, []);
 
+  const loadFavorites = useCallback(async () => {
+    const res = await fetch("/api/favorites");
+    setFavorites(res.ok ? await res.json() : []);
+  }, []);
+
   useEffect(() => {
     // Fetch-on-mount/date-change; the lint rule can't see that `load`'s first
     // setState is intentional (shows the loading state for the new date).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load(selectedDate);
   }, [selectedDate, load]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadFavorites();
+  }, [loadFavorites]);
 
   const deleteWeight = async (id: string) => {
     setWeightLogs((prev) => prev.filter((w) => w.id !== id));
@@ -41,6 +55,34 @@ export default function Dashboard({ userName }: { userName: string | null }) {
   const deleteMeal = async (id: string) => {
     setMealLogs((prev) => prev.filter((m) => m.id !== id));
     await fetch(`/api/meals?id=${id}`, { method: "DELETE" });
+  };
+
+  const isFavorited = (rawText: string) =>
+    favorites.some((f) => f.rawText.trim().toLowerCase() === rawText.trim().toLowerCase());
+
+  const toggleFavorite = async (meal: MealLogDTO) => {
+    const existing = favorites.find(
+      (f) => f.rawText.trim().toLowerCase() === meal.rawText.trim().toLowerCase(),
+    );
+    setFavoritingId(meal.id);
+    try {
+      if (existing) {
+        setFavorites((prev) => prev.filter((f) => f.id !== existing.id));
+        await fetch(`/api/favorites?id=${existing.id}`, { method: "DELETE" });
+      } else {
+        const res = await fetch("/api/favorites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mealLogId: meal.id }),
+        });
+        if (res.ok) {
+          const favorite = await res.json();
+          setFavorites((prev) => [favorite, ...prev.filter((f) => f.id !== favorite.id)]);
+        }
+      }
+    } finally {
+      setFavoritingId(null);
+    }
   };
 
   const openSheet = (tab: "weight" | "meal") => {
@@ -126,13 +168,31 @@ export default function Dashboard({ userName }: { userName: string | null }) {
             <li key={meal.id} className="rounded-2xl border border-border bg-surface p-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-xs text-muted">{formatTime(new Date(meal.loggedAt))}</p>
+                  <p className="text-xs text-muted">
+                    {formatTime(new Date(meal.loggedAt))}
+                    {meal.userEdited && <span className="ml-1.5 text-accent">· edited</span>}
+                  </p>
                   <p className="truncate text-sm font-medium">{meal.rawText}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {meal.calories != null && meal.calories > 0 && (
                     <span className="whitespace-nowrap text-sm font-semibold">{meal.calories} kcal</span>
                   )}
+                  <button
+                    onClick={() => toggleFavorite(meal)}
+                    disabled={favoritingId === meal.id}
+                    className={isFavorited(meal.rawText) ? "text-accent" : "text-muted"}
+                    aria-label="Toggle favorite"
+                  >
+                    {isFavorited(meal.rawText) ? "★" : "☆"}
+                  </button>
+                  <button
+                    onClick={() => setEditingMeal(meal)}
+                    className="text-muted"
+                    aria-label="Edit meal"
+                  >
+                    ✎
+                  </button>
                   <button
                     onClick={() => deleteMeal(meal.id)}
                     className="text-muted"
@@ -199,9 +259,21 @@ export default function Dashboard({ userName }: { userName: string | null }) {
         <AddEntrySheet
           selectedDate={selectedDate}
           defaultTab={sheetTab}
+          favorites={favorites}
           onClose={() => setSheetOpen(false)}
           onSaved={() => {
             setSheetOpen(false);
+            load(selectedDate);
+          }}
+        />
+      )}
+
+      {editingMeal && (
+        <EditMealSheet
+          meal={editingMeal}
+          onClose={() => setEditingMeal(null)}
+          onSaved={() => {
+            setEditingMeal(null);
             load(selectedDate);
           }}
         />

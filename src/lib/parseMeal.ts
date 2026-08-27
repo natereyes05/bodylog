@@ -23,6 +23,8 @@ export interface PastMeal {
   rawText: string;
   loggedAt: Date;
   items: ParsedMealItem[];
+  /** Whether the user manually corrected this entry's numbers after the AI logged it. */
+  verified: boolean;
 }
 
 const TOOL_NAME = "log_meal_nutrition";
@@ -42,7 +44,11 @@ function client() {
 function buildReferenceBlock(pastMeals: PastMeal[]): string {
   if (pastMeals.length === 0) return "";
 
-  const lines = pastMeals.slice(0, MAX_REFERENCE_MEALS).map((meal) => {
+  // User-verified (manually corrected) entries are the most trustworthy —
+  // surface them first so they're never pushed out by the MAX_REFERENCE_MEALS cap.
+  const sorted = [...pastMeals].sort((a, b) => Number(b.verified) - Number(a.verified));
+
+  const lines = sorted.slice(0, MAX_REFERENCE_MEALS).map((meal) => {
     const date = meal.loggedAt.toISOString().slice(0, 10);
     const itemized = meal.items.map((i) => ({
       name: i.name,
@@ -53,14 +59,17 @@ function buildReferenceBlock(pastMeals: PastMeal[]): string {
       fat: i.fatG,
       fiber: i.fiberG,
     }));
-    return `[Reference] "${meal.rawText}" (${date}) -> Itemized: ${JSON.stringify(itemized)}`;
+    const tag = meal.verified ? "Reference, user-verified" : "Reference";
+    return `[${tag}] "${meal.rawText}" (${date}) -> Itemized: ${JSON.stringify(itemized)}`;
   });
 
   return (
-    "\n\nThis user has logged the following meals before, with the exact nutrition values used at the time:\n" +
+    "\n\nThis user has logged the following meals before, with the exact nutrition values used at the time. " +
+    "Entries tagged 'user-verified' were manually corrected by the user and are ground truth, not a guess:\n" +
     lines.join("\n") +
     "\n\nUse the provided reference meals as high-priority unit baselines if the current food matches an " +
-    "existing custom recipe or correction, but estimate freshly if quantities or items differ."
+    "existing custom recipe or correction — preferring a user-verified match over a non-verified one if both " +
+    "are plausible — but estimate freshly if quantities or items differ."
   );
 }
 
@@ -117,6 +126,19 @@ export function reconcileItem(item: ParsedMealItem): ParsedMealItem {
     fatG,
     fiberG,
   };
+}
+
+export function sumItems(items: ParsedMealItem[]): Omit<ParsedMeal, "items"> {
+  return items.reduce(
+    (acc, item) => ({
+      calories: acc.calories + item.calories,
+      proteinG: acc.proteinG + item.proteinG,
+      carbsG: acc.carbsG + item.carbsG,
+      fatG: acc.fatG + item.fatG,
+      fiberG: acc.fiberG + item.fiberG,
+    }),
+    { calories: 0, proteinG: 0, carbsG: 0, fatG: 0, fiberG: 0 },
+  );
 }
 
 export async function parseMeal(rawText: string, pastMeals: PastMeal[] = []): Promise<ParsedMeal> {
@@ -180,16 +202,5 @@ export async function parseMeal(rawText: string, pastMeals: PastMeal[] = []): Pr
   const rawItems = (toolUse?.input as { items?: ParsedMealItem[] } | undefined)?.items ?? [];
   const items = rawItems.map(reconcileItem);
 
-  const totals = items.reduce(
-    (acc, item) => ({
-      calories: acc.calories + item.calories,
-      proteinG: acc.proteinG + item.proteinG,
-      carbsG: acc.carbsG + item.carbsG,
-      fatG: acc.fatG + item.fatG,
-      fiberG: acc.fiberG + item.fiberG,
-    }),
-    { calories: 0, proteinG: 0, carbsG: 0, fatG: 0, fiberG: 0 },
-  );
-
-  return { items, ...totals };
+  return { items, ...sumItems(items) };
 }

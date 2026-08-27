@@ -2,17 +2,20 @@
 
 import { useState } from "react";
 import { combineDateAndTime, toDateInputValue, toTimeInputValue } from "@/lib/dateUtils";
+import type { FavoriteMealDTO } from "@/lib/types";
 
 type Tab = "weight" | "meal";
 
 export default function AddEntrySheet({
   selectedDate,
   defaultTab,
+  favorites,
   onClose,
   onSaved,
 }: {
   selectedDate: Date;
   defaultTab: Tab;
+  favorites: FavoriteMealDTO[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -40,6 +43,27 @@ export default function AddEntrySheet({
         loggedAt: combineDateAndTime(date, time).toISOString(),
         weightValue: value,
         weightUnit,
+      }),
+    });
+    setLoading(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setError(data.error ?? "Couldn't save that.");
+      return;
+    }
+    onSaved();
+  };
+
+  const submitFavorite = async (favoriteId: string) => {
+    if (!favoriteId) return;
+    setError(null);
+    setLoading(true);
+    const res = await fetch("/api/meals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        loggedAt: combineDateAndTime(date, time).toISOString(),
+        favoriteId,
       }),
     });
     setLoading(false);
@@ -161,6 +185,29 @@ export default function AddEntrySheet({
           </div>
         ) : (
           <div className="space-y-4">
+            {favorites.length > 0 && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted">
+                  Quick add from favorites
+                </label>
+                <select
+                  defaultValue=""
+                  disabled={loading}
+                  onChange={(e) => submitFavorite(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base outline-none focus:border-accent"
+                >
+                  <option value="" disabled>
+                    Select a saved meal…
+                  </option>
+                  {favorites.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.rawText.length > 60 ? `${f.rawText.slice(0, 60)}…` : f.rawText}
+                      {f.calories != null ? ` (${f.calories} kcal)` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="mb-1 block text-xs font-medium text-muted">
                 What did you eat?

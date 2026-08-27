@@ -11,13 +11,14 @@ datasource db {
 }
 
 model User {
-  id           String      @id @default(cuid())
-  email        String      @unique
-  passwordHash String
-  name         String?
-  createdAt    DateTime    @default(now())
-  weightLogs   WeightLog[]
-  mealLogs     MealLog[]
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String
+  name          String?
+  createdAt     DateTime       @default(now())
+  weightLogs    WeightLog[]
+  mealLogs      MealLog[]
+  favoriteMeals FavoriteMeal[]
 }
 
 model WeightLog {
@@ -33,10 +34,27 @@ model WeightLog {
 }
 
 model MealLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loggedAt   DateTime
+  rawText    String
+  items      Json
+  calories   Int?
+  proteinG   Int?
+  carbsG     Int?
+  fatG       Int?
+  fiberG     Int?
+  userEdited Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([userId, loggedAt])
+}
+
+model FavoriteMeal {
   id        String   @id @default(cuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  loggedAt  DateTime
   rawText   String
   items     Json
   calories  Int?
@@ -46,5 +64,5 @@ model MealLog {
   fiberG    Int?
   createdAt DateTime @default(now())
 
-  @@index([userId, loggedAt])
+  @@index([userId])
 }
