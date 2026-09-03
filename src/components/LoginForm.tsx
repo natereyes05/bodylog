@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -35,8 +36,18 @@ export default function LoginForm() {
     <main className="flex flex-1 items-center justify-center px-6 py-12">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
+          <Image
+            src="/icon-192.png"
+            alt=""
+            width={56}
+            height={56}
+            className="mx-auto mb-4 rounded-2xl shadow-lg shadow-accent/20"
+          />
           <h1 className="text-2xl font-semibold">BodyLog</h1>
-          <p className="mt-1 text-sm text-muted">Log in to keep tracking.</p>
+          <p className="mx-auto mt-2 max-w-[26rem] text-sm leading-relaxed text-muted">
+            Track your weight and meals just by describing them. AI handles the nutrition
+            breakdown — grounded in real USDA and restaurant data, not guesswork.
+          </p>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-4">
