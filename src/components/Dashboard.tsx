@@ -1,16 +1,19 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import AddEntrySheet from "@/components/AddEntrySheet";
 import EditMealSheet from "@/components/EditMealSheet";
+import ProgressRing from "@/components/ProgressRing";
 import { dayRange, formatTime, friendlyDayLabel, shiftDay, toDateInputValue } from "@/lib/dateUtils";
-import type { FavoriteMealDTO, MealLogDTO, WeightLogDTO } from "@/lib/types";
+import type { FavoriteMealDTO, MealLogDTO, ProfileDTO, WeightLogDTO } from "@/lib/types";
 
 export default function Dashboard({ userName }: { userName: string | null }) {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [weightLogs, setWeightLogs] = useState<WeightLogDTO[]>([]);
   const [mealLogs, setMealLogs] = useState<MealLogDTO[]>([]);
   const [favorites, setFavorites] = useState<FavoriteMealDTO[]>([]);
+  const [goals, setGoals] = useState<ProfileDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetTab, setSheetTab] = useState<"weight" | "meal">("meal");
@@ -35,6 +38,11 @@ export default function Dashboard({ userName }: { userName: string | null }) {
     setFavorites(res.ok ? await res.json() : []);
   }, []);
 
+  const loadGoals = useCallback(async () => {
+    const res = await fetch("/api/profile");
+    setGoals(res.ok ? await res.json() : null);
+  }, []);
+
   useEffect(() => {
     // Fetch-on-mount/date-change; the lint rule can't see that `load`'s first
     // setState is intentional (shows the loading state for the new date).
@@ -45,7 +53,8 @@ export default function Dashboard({ userName }: { userName: string | null }) {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadFavorites();
-  }, [loadFavorites]);
+    loadGoals();
+  }, [loadFavorites, loadGoals]);
 
   const deleteWeight = async (id: string) => {
     setWeightLogs((prev) => prev.filter((w) => w.id !== id));
@@ -126,6 +135,29 @@ export default function Dashboard({ userName }: { userName: string | null }) {
           ›
         </button>
       </div>
+
+      {goals && (goals.calorieGoal || goals.proteinGoalG || goals.fiberGoalG) ? (
+        <div className="mb-3 flex items-center justify-around rounded-2xl border border-border bg-surface p-4">
+          {goals.calorieGoal ? (
+            <ProgressRing label="Calories" value={totalCalories} goal={goals.calorieGoal} unit="" />
+          ) : null}
+          {goals.proteinGoalG ? (
+            <ProgressRing label="Protein" value={totalProtein} goal={goals.proteinGoalG} unit="g" />
+          ) : null}
+          {goals.fiberGoalG ? (
+            <ProgressRing label="Fiber" value={totalFiber} goal={goals.fiberGoalG} unit="g" />
+          ) : null}
+        </div>
+      ) : (
+        goals && (
+          <Link
+            href="/profile"
+            className="mb-3 block rounded-2xl border border-dashed border-border p-4 text-center text-sm text-muted"
+          >
+            Set daily goals to see progress rings here →
+          </Link>
+        )
+      )}
 
       <button
         onClick={() => openSheet("weight")}

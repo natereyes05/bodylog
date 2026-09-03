@@ -38,3 +38,13 @@ export interface FavoriteMealDTO {
   fatG: number | null;
   fiberG: number | null;
 }
+
+export interface ProfileDTO {
+  name: string | null;
+  email: string;
+  calorieGoal: number | null;
+  proteinGoalG: number | null;
+  carbsGoalG: number | null;
+  fatGoalG: number | null;
+  fiberGoalG: number | null;
+}

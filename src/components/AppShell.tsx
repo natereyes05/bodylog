@@ -5,7 +5,7 @@ export default function AppShell({
   active,
   children,
 }: {
-  active: "log" | "trends";
+  active: "log" | "trends" | "profile";
   children: React.ReactNode;
 }) {
   return (
@@ -34,6 +34,14 @@ export default function AppShell({
             }`}
           >
             Trends
+          </Link>
+          <Link
+            href="/profile"
+            className={`flex-1 py-3 text-center text-sm font-medium ${
+              active === "profile" ? "text-accent" : "text-muted"
+            }`}
+          >
+            Profile
           </Link>
         </div>
       </nav>

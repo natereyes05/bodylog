@@ -19,6 +19,13 @@ model User {
   weightLogs    WeightLog[]
   mealLogs      MealLog[]
   favoriteMeals FavoriteMeal[]
+
+  // Daily macro goals — null means "no goal set" for that macro.
+  calorieGoal  Int?
+  proteinGoalG Int?
+  carbsGoalG   Int?
+  fatGoalG     Int?
+  fiberGoalG   Int?
 }
 
 model WeightLog {
