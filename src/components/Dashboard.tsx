@@ -106,6 +106,21 @@ export default function Dashboard({ userName }: { userName: string | null }) {
   const totalFiber = mealLogs.reduce((sum, m) => sum + (m.fiberG ?? 0), 0);
   const latestWeight = weightLogs[0];
 
+  // Only show a macro as a ring OR in the plain-text totals, never both.
+  const hasCalorieRing = !!goals?.calorieGoal;
+  const hasProteinRing = !!goals?.proteinGoalG;
+  const hasFiberRing = !!goals?.fiberGoalG;
+  const hasAnyRing = hasCalorieRing || hasProteinRing || hasFiberRing;
+  const totalsSummary = [
+    !hasCalorieRing && `${totalCalories} kcal`,
+    !hasProteinRing && `P ${totalProtein}g`,
+    `C ${totalCarbs}g`,
+    `F ${totalFat}g`,
+    !hasFiberRing && `Fiber ${totalFiber}g`,
+  ]
+    .filter((part): part is string => !!part)
+    .join(" · ");
+
   return (
     <div className="mx-auto max-w-lg px-4 pt-4">
       {userName && <p className="mb-1 text-sm text-muted">Hey {userName.split(" ")[0]} 👋</p>}
@@ -136,29 +151,6 @@ export default function Dashboard({ userName }: { userName: string | null }) {
         </button>
       </div>
 
-      {goals && (goals.calorieGoal || goals.proteinGoalG || goals.fiberGoalG) ? (
-        <div className="mb-3 flex items-center justify-around rounded-2xl border border-border bg-surface p-4">
-          {goals.calorieGoal ? (
-            <ProgressRing label="Calories" value={totalCalories} goal={goals.calorieGoal} unit="" />
-          ) : null}
-          {goals.proteinGoalG ? (
-            <ProgressRing label="Protein" value={totalProtein} goal={goals.proteinGoalG} unit="g" />
-          ) : null}
-          {goals.fiberGoalG ? (
-            <ProgressRing label="Fiber" value={totalFiber} goal={goals.fiberGoalG} unit="g" />
-          ) : null}
-        </div>
-      ) : (
-        goals && (
-          <Link
-            href="/profile"
-            className="mb-3 block rounded-2xl border border-dashed border-border p-4 text-center text-sm text-muted"
-          >
-            Set daily goals to see progress rings here →
-          </Link>
-        )
-      )}
-
       <button
         onClick={() => openSheet("weight")}
         className="mb-3 w-full rounded-2xl border border-border bg-surface p-4 text-left"
@@ -179,16 +171,32 @@ export default function Dashboard({ userName }: { userName: string | null }) {
       </button>
 
       <div className="mb-3 rounded-2xl border border-border bg-surface p-4">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-muted">Meals</span>
-          <span className="text-sm font-medium">
-            {mealLogs.length > 0 ? `${totalCalories} kcal today` : "Nothing logged yet"}
-          </span>
-        </div>
-        {mealLogs.length > 0 && (
-          <p className="mt-1 text-xs text-muted">
-            P {totalProtein}g · C {totalCarbs}g · F {totalFat}g · Fiber {totalFiber}g
-          </p>
+        <span className="text-sm font-medium text-muted">Meals</span>
+
+        {hasAnyRing && (
+          <div className="my-3 flex items-center justify-around">
+            {hasCalorieRing && (
+              <ProgressRing label="Calories" value={totalCalories} goal={goals!.calorieGoal!} unit="" />
+            )}
+            {hasProteinRing && (
+              <ProgressRing label="Protein" value={totalProtein} goal={goals!.proteinGoalG!} unit="g" />
+            )}
+            {hasFiberRing && (
+              <ProgressRing label="Fiber" value={totalFiber} goal={goals!.fiberGoalG!} unit="g" />
+            )}
+          </div>
+        )}
+
+        {mealLogs.length > 0 ? (
+          <p className={hasAnyRing ? "mt-1 text-xs text-muted" : "mt-1 text-sm font-medium"}>{totalsSummary}</p>
+        ) : (
+          <p className="mt-1 text-sm text-muted">Nothing logged yet</p>
+        )}
+
+        {goals && !hasAnyRing && (
+          <Link href="/profile" className="mt-2 block text-xs text-accent">
+            Set daily goals to see progress rings here →
+          </Link>
         )}
       </div>
 
