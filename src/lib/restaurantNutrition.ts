@@ -29,13 +29,22 @@ export function restaurantSearchEnabled(): boolean {
  * never throws; any failure degrades to a fallback instruction string so a
  * flaky search never breaks meal logging.
  */
-export async function searchRestaurantNutrition(restaurant: string, item: string): Promise<string> {
+export async function searchRestaurantNutrition(
+  restaurant: string,
+  item: string,
+  locationHint?: string | null,
+): Promise<string> {
   const apiKey = process.env.TAVILY_API_KEY;
   if (!apiKey) {
     return "Restaurant nutrition search is not configured. Estimate using your own knowledge instead.";
   }
 
-  const query = `${restaurant} ${item} nutrition facts calories protein`.trim();
+  const location = locationHint?.trim();
+  const query = (
+    location
+      ? `${restaurant} ${item} nutrition facts calories protein (${location})`
+      : `${restaurant} ${item} nutrition facts calories protein`
+  ).trim();
 
   try {
     const res = await fetch("https://api.tavily.com/search", {

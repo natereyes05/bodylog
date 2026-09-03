@@ -29,6 +29,13 @@ export interface PastMeal {
   verified: boolean;
 }
 
+/** A meal already logged earlier the same day, for resolving relative/follow-up phrasing. */
+export interface TodayMealContext {
+  rawText: string;
+  loggedAt: Date;
+  items: ParsedMealItem[];
+}
+
 const LOG_TOOL_NAME = "log_meal_nutrition";
 const USDA_TOOL_NAME = "search_usda_food";
 const RESTAURANT_TOOL_NAME = "search_restaurant_nutrition";
@@ -81,6 +88,28 @@ function buildReferenceBlock(pastMeals: PastMeal[]): string {
   );
 }
 
+function buildTodayContextBlock(todaysMeals: TodayMealContext[]): string {
+  if (todaysMeals.length === 0) return "";
+
+  const lines = todaysMeals.map((meal) => {
+    const time = meal.loggedAt.toISOString().slice(11, 16);
+    const itemized = meal.items
+      .map((i) => `${i.name} (${i.quantity}): ${i.calories} kcal, ${i.proteinG}g protein, ${i.carbsG}g carbs, ${i.fatG}g fat, ${i.fiberG}g fiber`)
+      .join("; ");
+    return `- [${time} UTC] "${meal.rawText}" -> ${itemized}`;
+  });
+
+  return (
+    "\n\nMeals already logged earlier today, in order:\n" +
+    lines.join("\n") +
+    "\n\nUse these to resolve relative or follow-up phrasing in the new entry: \"add another X\" means duplicate " +
+    "the matching item's exact macros; \"only ate half\" / \"ate 3/4 of it\" means scale the matching meal's " +
+    "macros proportionally; a correction like \"I meant 8 pieces, not 8 rolls\" means reinterpret the quantity " +
+    "or unit of the matching meal and rescale its macros accordingly, rather than logging a duplicate. If " +
+    "nothing above plausibly matches what the new entry refers to, treat it as a new, unrelated item instead."
+  );
+}
+
 const BASE_SYSTEM_PROMPT = `You are a nutrition estimation assistant. Given a free-text description of a meal or snack, break it into individual food items and estimate reasonable nutrition values for the quantities described (or typical single-serving quantities if none are given).
 
 Follow these rules precisely:
@@ -91,17 +120,21 @@ Follow these rules precisely:
 
 3. Dressings & sauces: Always give salad dressings, sauces, and condiments their own line item, unless the user explicitly says "no dressing" or "dry".
 
-4. Composite dishes: For composite foods (sushi rolls, burritos, sandwiches, rice bowls, etc.), decompose them into their component elements — carb base, protein portion by cooked weight, cheese, sauces, etc. — rather than guessing a single lump sum for the whole dish.
+4. Composite dishes: For composite foods (sushi rolls, burritos, sandwiches, rice bowls, etc.), decompose them into their component elements — carb base, protein portion by cooked weight, cheese, sauces, etc. — rather than guessing a single lump sum for the whole dish. For standard 8-piece specialty sushi rolls specifically, use roughly 120–140g of seasoned sushi rice (rice vinegar and sugar included — about 200–240 kcal and ~48g carbs for the rice alone) as your baseline before adding fillings and toppings.
 
 5. Atwater consistency: Every item's calories must be consistent with standard energy factors: calories ≈ (protein_g * 4) + (carbs_g * 4) + (fat_g * 9). Do not report a calorie value that contradicts the macros you assign to the same item.
 
-6. Fiber: fiber_g must never exceed carbs_g for a given item, since fiber is a component of total carbohydrates.`;
+6. Fiber: fiber_g must never exceed carbs_g for a given item, since fiber is a component of total carbohydrates.
+
+7. Multi-serving packaged foods: if the user says they ate an entire pack, pouch, box, or container of a packaged grocery item (e.g. a whole box of mac & cheese, a full frozen entrée pouch), report macros for the whole container — multiply the standard single-serving nutrition by the servings-per-container — not just one serving, unless the user says they only ate part of it.`;
 
 const USDA_INSTRUCTIONS = `
 
 You also have a search_usda_food tool backed by USDA FoodData Central, the federal nutrient database (Foundation Foods, SR Legacy, Survey/FNDDS, and Branded data). For each distinct whole/generic food item in this meal — not cooking oil/butter, and not a homemade custom recipe unlikely to exist as a single database entry — call search_usda_food with a short, specific query (e.g. "chicken breast cooked", not "chicken") to ground that item's numbers in real measured data instead of estimating from memory.
 
-Prefer a "Foundation" or "SR Legacy" match for generic whole foods — they're the cleanest reference data. Use a "Branded" match only when the user names a specific product or restaurant item, and prefer results whose brandOwner matches what the user said. All per100g values are per 100 grams of the food; scale them yourself to the item's actual quantity. If labelServingSize/labelServingUnit is present, that's the manufacturer's stated serving size in grams, in case it's a more natural unit to reason from.`;
+Prefer a "Foundation" or "SR Legacy" match for generic whole foods — they're the cleanest reference data. Use a "Branded" match only when the user names a specific product or restaurant item, and prefer results whose brandOwner matches what the user said. All per100g values are per 100 grams of the food; scale them yourself to the item's actual quantity. If labelServingSize/labelServingUnit is present, that's the manufacturer's stated serving size in grams, in case it's a more natural unit to reason from.
+
+For meats, poultry, or fish specifically, prefer results whose description includes "cooked", "roasted", "baked", "grilled", or "broiled" over "raw" ones — raw-weight protein values are lower per 100g than cooked (water is lost during cooking), so a raw entry will understate protein for a cooked portion. Only use a raw entry if the user explicitly said the food was eaten raw.`;
 
 const RESTAURANT_INSTRUCTIONS = `
 
@@ -115,16 +148,27 @@ Combo & side isolation: when a search result gives macros for an entrée, check 
 
 Fallback: if no official nutrition disclosure turns up (common for small independent/local restaurants), use whatever the search reveals about the dish's likely ingredients to decompose it into components, then resolve those components with search_usda_food or your own whole-food knowledge instead.`;
 
+const PARALLEL_SEARCH_INSTRUCTIONS = `
+
+When a meal has multiple distinct items that each need grounding (e.g. an entrée and a side, or several ingredients), emit all of their search tool calls together in the same turn rather than searching one item, waiting for results, then searching the next — this keeps the request fast. Only search sequentially when a later search genuinely depends on an earlier result.`;
+
 const FINALIZE_INSTRUCTIONS = `
 
 Once every item is resolved, call log_meal_nutrition exactly once with the final structured result — never ask a clarifying question.`;
 
-function buildSystemPrompt(pastMeals: PastMeal[], withUsda: boolean, withRestaurant: boolean): string {
+function buildSystemPrompt(
+  pastMeals: PastMeal[],
+  todaysMeals: TodayMealContext[],
+  withUsda: boolean,
+  withRestaurant: boolean,
+): string {
   return (
     BASE_SYSTEM_PROMPT +
     (withUsda ? USDA_INSTRUCTIONS : "") +
     (withRestaurant ? RESTAURANT_INSTRUCTIONS : "") +
+    (withUsda || withRestaurant ? PARALLEL_SEARCH_INSTRUCTIONS : "") +
     FINALIZE_INSTRUCTIONS +
+    buildTodayContextBlock(todaysMeals) +
     buildReferenceBlock(pastMeals)
   );
 }
@@ -259,7 +303,7 @@ function emptyMeal(rawText: string): ParsedMeal {
 }
 
 /** Runs a single search-tool call and returns its result as tool_result text. Never throws. */
-async function runSearchTool(block: Anthropic.ToolUseBlock): Promise<string> {
+async function runSearchTool(block: Anthropic.ToolUseBlock, locationHint?: string | null): Promise<string> {
   if (block.name === USDA_TOOL_NAME) {
     const query = (block.input as { query?: string } | undefined)?.query ?? "";
     const candidates = await searchUsdaFood(query);
@@ -271,15 +315,20 @@ async function runSearchTool(block: Anthropic.ToolUseBlock): Promise<string> {
     const input = block.input as { restaurant?: string; item?: string } | undefined;
     const restaurant = input?.restaurant ?? "";
     const item = input?.item ?? "";
-    const result = await searchRestaurantNutrition(restaurant, item);
-    console.log(`[Restaurant] "${restaurant}" / "${item}" -> ${result.length} chars`);
+    const result = await searchRestaurantNutrition(restaurant, item, locationHint);
+    console.log(`[Restaurant] "${restaurant}" / "${item}"${locationHint ? ` near "${locationHint}"` : ""} -> ${result.length} chars`);
     return result;
   }
 
   return "Unknown tool.";
 }
 
-export async function parseMeal(rawText: string, pastMeals: PastMeal[] = []): Promise<ParsedMeal> {
+export async function parseMeal(
+  rawText: string,
+  pastMeals: PastMeal[] = [],
+  todaysMeals: TodayMealContext[] = [],
+  locationHint?: string | null,
+): Promise<ParsedMeal> {
   const anthropic = client();
 
   if (!anthropic) {
@@ -297,7 +346,7 @@ export async function parseMeal(rawText: string, pastMeals: PastMeal[] = []): Pr
     ...(withRestaurant ? [searchRestaurantTool] : []),
     logMealTool,
   ];
-  const system = buildSystemPrompt(pastMeals, withUsda, withRestaurant);
+  const system = buildSystemPrompt(pastMeals, todaysMeals, withUsda, withRestaurant);
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: rawText }];
 
@@ -345,7 +394,7 @@ export async function parseMeal(rawText: string, pastMeals: PastMeal[] = []): Pr
       searches.map(async (block) => ({
         type: "tool_result" as const,
         tool_use_id: block.id,
-        content: await runSearchTool(block),
+        content: await runSearchTool(block, locationHint),
       })),
     );
     messages.push({ role: "user", content: toolResults });

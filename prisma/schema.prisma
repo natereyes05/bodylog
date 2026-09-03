@@ -26,6 +26,10 @@ model User {
   carbsGoalG   Int?
   fatGoalG     Int?
   fiberGoalG   Int?
+
+  // Human-readable location (e.g. "San Diego, CA"), used to anchor
+  // restaurant nutrition searches toward local results.
+  locationHint String?
 }
 
 model WeightLog {

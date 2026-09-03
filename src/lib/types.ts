@@ -47,4 +47,5 @@ export interface ProfileDTO {
   carbsGoalG: number | null;
   fatGoalG: number | null;
   fiberGoalG: number | null;
+  locationHint: string | null;
 }
