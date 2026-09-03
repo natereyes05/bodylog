@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { searchUsdaFood, usdaEnabled, type FdcCandidate } from "@/lib/usdaFdc";
+import { searchRestaurantNutrition, restaurantSearchEnabled } from "@/lib/restaurantNutrition";
 
 export interface ParsedMealItem {
   name: string;
@@ -29,11 +30,13 @@ export interface PastMeal {
 }
 
 const LOG_TOOL_NAME = "log_meal_nutrition";
-const SEARCH_TOOL_NAME = "search_usda_food";
+const USDA_TOOL_NAME = "search_usda_food";
+const RESTAURANT_TOOL_NAME = "search_restaurant_nutrition";
 const MAX_REFERENCE_MEALS = 60;
-// Upper bound on search_usda_food round-trips per meal before we force a
-// final answer, so a confused model can't loop indefinitely on our dime.
-const MAX_TOOL_ROUNDS = 5;
+// Upper bound on search round-trips per meal before we force a final answer,
+// so a confused model can't loop indefinitely on our dime. A multi-item
+// restaurant order (entree + side + drink) can reasonably need several.
+const MAX_TOOL_ROUNDS = 8;
 
 // How far an item's stated calories may drift from its Atwater-derived value
 // (4 kcal/g protein, 4 kcal/g carbs, 9 kcal/g fat) before we don't trust it.
@@ -98,12 +101,32 @@ const USDA_INSTRUCTIONS = `
 
 You also have a search_usda_food tool backed by USDA FoodData Central, the federal nutrient database (Foundation Foods, SR Legacy, Survey/FNDDS, and Branded data). For each distinct whole/generic food item in this meal — not cooking oil/butter, and not a homemade custom recipe unlikely to exist as a single database entry — call search_usda_food with a short, specific query (e.g. "chicken breast cooked", not "chicken") to ground that item's numbers in real measured data instead of estimating from memory.
 
-Prefer a "Foundation" or "SR Legacy" match for generic whole foods — they're the cleanest reference data. Use a "Branded" match only when the user names a specific product or restaurant item, and prefer results whose brandOwner matches what the user said. All per100g values are per 100 grams of the food; scale them yourself to the item's actual quantity. If labelServingSize/labelServingUnit is present, that's the manufacturer's stated serving size in grams, in case it's a more natural unit to reason from.
+Prefer a "Foundation" or "SR Legacy" match for generic whole foods — they're the cleanest reference data. Use a "Branded" match only when the user names a specific product or restaurant item, and prefer results whose brandOwner matches what the user said. All per100g values are per 100 grams of the food; scale them yourself to the item's actual quantity. If labelServingSize/labelServingUnit is present, that's the manufacturer's stated serving size in grams, in case it's a more natural unit to reason from.`;
 
-If a search returns no good match, or the item is a custom recipe, fall back to your own best estimate — never let a bad or irrelevant search result override common sense. You may search for multiple items, one at a time or reviewing several before deciding. Once every item is resolved, call log_meal_nutrition exactly once with the final structured result — never ask a clarifying question.`;
+const RESTAURANT_INSTRUCTIONS = `
 
-function buildSystemPrompt(pastMeals: PastMeal[], includeUsda: boolean): string {
-  return BASE_SYSTEM_PROMPT + (includeUsda ? USDA_INSTRUCTIONS : "") + buildReferenceBlock(pastMeals);
+You also have a search_restaurant_nutrition tool that searches the web for published restaurant/chain nutrition disclosures (official nutrition PDFs, menu pages, etc.).
+
+Routing: use search_restaurant_nutrition instead of search_usda_food whenever the meal names or clearly implies a specific restaurant, fast-food chain, or branded eatery (e.g. Chili's, Taco Bell, Cava, In-N-Out) — USDA has no reliable current chain-restaurant menu data. Use search_usda_food for whole foods, raw ingredients, grocery items, and home-cooked staples, even when eaten "at" somewhere unnamed.
+
+Fuzzy item matching: map the user's colloquial description to what's likely the official published menu item name (e.g. a "double smash burger" at a burger chain probably corresponds to their double smashed-patty burger product) — search using your best guess at the real name, and adjust based on what the results actually show.
+
+Combo & side isolation: when a search result gives macros for an entrée, check whether they already include fries, a drink, sauce, or other combo components, or whether they're for the entrée alone. Don't assume sides are bundled in unless the source says so — log fries, drinks, and dipping sauces the user mentions as their own distinct line items with their own published (or estimated) values.
+
+Fallback: if no official nutrition disclosure turns up (common for small independent/local restaurants), use whatever the search reveals about the dish's likely ingredients to decompose it into components, then resolve those components with search_usda_food or your own whole-food knowledge instead.`;
+
+const FINALIZE_INSTRUCTIONS = `
+
+Once every item is resolved, call log_meal_nutrition exactly once with the final structured result — never ask a clarifying question.`;
+
+function buildSystemPrompt(pastMeals: PastMeal[], withUsda: boolean, withRestaurant: boolean): string {
+  return (
+    BASE_SYSTEM_PROMPT +
+    (withUsda ? USDA_INSTRUCTIONS : "") +
+    (withRestaurant ? RESTAURANT_INSTRUCTIONS : "") +
+    FINALIZE_INSTRUCTIONS +
+    buildReferenceBlock(pastMeals)
+  );
 }
 
 const logMealTool: Anthropic.Tool = {
@@ -134,10 +157,10 @@ const logMealTool: Anthropic.Tool = {
 };
 
 const searchUsdaTool: Anthropic.Tool = {
-  name: SEARCH_TOOL_NAME,
+  name: USDA_TOOL_NAME,
   description:
-    "Searches USDA FoodData Central for a single food item and returns up to 5 candidate matches with their " +
-    "per-100g nutrition values. Call once per distinct food item that isn't a custom recipe.",
+    "Searches USDA FoodData Central for a single whole/generic food item and returns up to 5 candidate " +
+    "matches with their per-100g nutrition values. Call once per distinct food item that isn't a custom recipe.",
   input_schema: {
     type: "object",
     properties: {
@@ -150,7 +173,22 @@ const searchUsdaTool: Anthropic.Tool = {
   },
 };
 
-function formatSearchResults(candidates: FdcCandidate[]): string {
+const searchRestaurantTool: Anthropic.Tool = {
+  name: RESTAURANT_TOOL_NAME,
+  description:
+    "Searches official published restaurant nutrition facts, PDF menus, and disclosures for a specific " +
+    "restaurant chain or dining establishment.",
+  input_schema: {
+    type: "object",
+    properties: {
+      restaurant: { type: "string", description: "The restaurant or chain name, e.g. \"Chili's\" or \"In-N-Out\"." },
+      item: { type: "string", description: "The specific menu item, e.g. \"Double Smasher Burger\" or \"3x3 Burger\"." },
+    },
+    required: ["restaurant", "item"],
+  },
+};
+
+function formatUsdaResults(candidates: FdcCandidate[]): string {
   if (candidates.length === 0) {
     return "No USDA FoodData Central results found for this query. Use your own nutrition knowledge to estimate this item instead.";
   }
@@ -220,6 +258,27 @@ function emptyMeal(rawText: string): ParsedMeal {
   };
 }
 
+/** Runs a single search-tool call and returns its result as tool_result text. Never throws. */
+async function runSearchTool(block: Anthropic.ToolUseBlock): Promise<string> {
+  if (block.name === USDA_TOOL_NAME) {
+    const query = (block.input as { query?: string } | undefined)?.query ?? "";
+    const candidates = await searchUsdaFood(query);
+    console.log(`[USDA] "${query}" -> ${candidates.length} result(s)${candidates[0] ? `, top: ${candidates[0].description}` : ""}`);
+    return formatUsdaResults(candidates);
+  }
+
+  if (block.name === RESTAURANT_TOOL_NAME) {
+    const input = block.input as { restaurant?: string; item?: string } | undefined;
+    const restaurant = input?.restaurant ?? "";
+    const item = input?.item ?? "";
+    const result = await searchRestaurantNutrition(restaurant, item);
+    console.log(`[Restaurant] "${restaurant}" / "${item}" -> ${result.length} chars`);
+    return result;
+  }
+
+  return "Unknown tool.";
+}
+
 export async function parseMeal(rawText: string, pastMeals: PastMeal[] = []): Promise<ParsedMeal> {
   const anthropic = client();
 
@@ -230,17 +289,24 @@ export async function parseMeal(rawText: string, pastMeals: PastMeal[] = []): Pr
   }
 
   const withUsda = usdaEnabled();
-  const tools = withUsda ? [searchUsdaTool, logMealTool] : [logMealTool];
-  const system = buildSystemPrompt(pastMeals, withUsda);
+  const withRestaurant = restaurantSearchEnabled();
+  const searchToolsOffered = withUsda || withRestaurant;
+
+  const tools: Anthropic.Tool[] = [
+    ...(withUsda ? [searchUsdaTool] : []),
+    ...(withRestaurant ? [searchRestaurantTool] : []),
+    logMealTool,
+  ];
+  const system = buildSystemPrompt(pastMeals, withUsda, withRestaurant);
 
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: rawText }];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const isLastRound = round === MAX_TOOL_ROUNDS - 1;
-    // Once USDA search isn't offered (or we're out of rounds), force the
+    // Once no search tools are offered (or we're out of rounds), force the
     // final tool so we always get back a usable, schema-valid result.
     const toolChoice: Anthropic.ToolChoice =
-      withUsda && !isLastRound ? { type: "auto" } : { type: "tool", name: LOG_TOOL_NAME };
+      searchToolsOffered && !isLastRound ? { type: "auto" } : { type: "tool", name: LOG_TOOL_NAME };
 
     const message = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
@@ -262,30 +328,25 @@ export async function parseMeal(rawText: string, pastMeals: PastMeal[] = []): Pr
       return { items, ...sumItems(items) };
     }
 
-    const searches = toolUseBlocks.filter((block) => block.name === SEARCH_TOOL_NAME);
+    const searches = toolUseBlocks.filter((block) => block.name !== LOG_TOOL_NAME);
     if (searches.length === 0) {
       // The model responded with plain text instead of a tool call — nudge
       // it back on track rather than looping forever.
       messages.push({ role: "assistant", content: message.content });
       messages.push({
         role: "user",
-        content: "Please respond by calling either search_usda_food or log_meal_nutrition — not with plain text.",
+        content: "Please respond by calling one of the provided tools — not with plain text.",
       });
       continue;
     }
 
     messages.push({ role: "assistant", content: message.content });
     const toolResults: Anthropic.ToolResultBlockParam[] = await Promise.all(
-      searches.map(async (block) => {
-        const query = (block.input as { query?: string } | undefined)?.query ?? "";
-        const candidates = await searchUsdaFood(query);
-        console.log(`[USDA] "${query}" -> ${candidates.length} result(s)${candidates[0] ? `, top: ${candidates[0].description}` : ""}`);
-        return {
-          type: "tool_result" as const,
-          tool_use_id: block.id,
-          content: formatSearchResults(candidates),
-        };
-      }),
+      searches.map(async (block) => ({
+        type: "tool_result" as const,
+        tool_use_id: block.id,
+        content: await runSearchTool(block),
+      })),
     );
     messages.push({ role: "user", content: toolResults });
   }
